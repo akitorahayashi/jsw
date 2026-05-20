@@ -25,13 +25,11 @@ struct Session {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenvy::dotenv().ok();
-
     let api_key = env::var("JULES_API_KEY")
-        .context("JULES_API_KEY is not set. Put it in .env before running this program.")?;
+        .context("JULES_API_KEY is not set. Ensure it is configured in GitHub Actions secrets.")?;
 
     if api_key.trim().is_empty() {
-        bail!("JULES_API_KEY is empty. Put a valid key in .env before running this program.");
+        bail!("JULES_API_KEY is empty. Ensure a valid key is set in GitHub Actions secrets.");
     }
 
     let client = build_client(&api_key)?;
@@ -48,7 +46,8 @@ fn build_client(api_key: &str) -> Result<reqwest::Client> {
     let mut headers = HeaderMap::new();
     headers.insert(
         "x-goog-api-key",
-        HeaderValue::from_str(api_key).context("JULES_API_KEY contains invalid header characters.")?,
+        HeaderValue::from_str(api_key)
+            .context("JULES_API_KEY contains invalid header characters.")?,
     );
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
@@ -74,10 +73,7 @@ async fn delete_sessions(client: &reqwest::Client, limit: Option<usize>) -> Resu
             break;
         }
 
-        let batch = sessions
-            .into_iter()
-            .take(remaining.unwrap_or(usize::MAX))
-            .collect();
+        let batch = sessions.into_iter().take(remaining.unwrap_or(usize::MAX)).collect();
         let batch_deleted = delete_batch(client, batch).await?;
         total_deleted += batch_deleted;
 
@@ -109,10 +105,7 @@ async fn list_sessions(client: &reqwest::Client, page_size: usize) -> Result<Vec
     Ok(payload.sessions)
 }
 
-async fn delete_batch(
-    client: &reqwest::Client,
-    sessions: Vec<Session>,
-) -> Result<usize> {
+async fn delete_batch(client: &reqwest::Client, sessions: Vec<Session>) -> Result<usize> {
     let batch_size = sessions.len();
     let started_at = Instant::now();
     let mut deleted = 0usize;
@@ -124,17 +117,11 @@ async fn delete_batch(
     }
 
     while let Some(task_result) = tasks.join_next().await {
-        task_result
-            .context("delete task panicked")?
-            .context("parallel delete failed")?;
+        task_result.context("delete task panicked")?.context("parallel delete failed")?;
         deleted += 1;
     }
 
-    println!(
-        "Deleted listed batch of {} in {:.2?}",
-        batch_size,
-        started_at.elapsed()
-    );
+    println!("Deleted listed batch of {} in {:.2?}", batch_size, started_at.elapsed());
 
     Ok(deleted)
 }
@@ -149,8 +136,7 @@ async fn delete_session(client: &reqwest::Client, session: &Session) -> Result<(
     match response.error_for_status_ref() {
         Ok(_) => Ok(()),
         Err(error) if error.status() == Some(reqwest::StatusCode::NOT_FOUND) => Ok(()),
-        Err(error) => Err(error).with_context(|| {
-            format!("Jules API rejected delete request for {}", session.id)
-        }),
+        Err(error) => Err(error)
+            .with_context(|| format!("Jules API rejected delete request for {}", session.id)),
     }
 }
