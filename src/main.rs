@@ -34,12 +34,30 @@ async fn main() -> Result<()> {
 
     let client = build_client(&api_key)?;
     let started_at = Instant::now();
-    let deleted = delete_sessions(&client, DELETE_LIMIT).await?;
+    let delete_limit = read_delete_limit()?;
+    let deleted = delete_sessions(&client, delete_limit).await?;
 
     println!("Deleted sessions: {}", deleted);
     println!("Elapsed: {:.2?}", started_at.elapsed());
 
     Ok(())
+}
+
+fn read_delete_limit() -> Result<Option<usize>> {
+    match env::var("DELETE_LIMIT") {
+        Ok(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                trimmed.parse::<usize>().map(Some).with_context(|| {
+                    format!("DELETE_LIMIT must be a non-negative integer, got {trimmed:?}")
+                })
+            }
+        }
+        Err(env::VarError::NotPresent) => Ok(DELETE_LIMIT),
+        Err(env::VarError::NotUnicode(_)) => bail!("DELETE_LIMIT is not valid Unicode."),
+    }
 }
 
 fn build_client(api_key: &str) -> Result<reqwest::Client> {
@@ -73,7 +91,10 @@ async fn delete_sessions(client: &reqwest::Client, limit: Option<usize>) -> Resu
             break;
         }
 
-        let batch = sessions.into_iter().take(remaining.unwrap_or(usize::MAX)).collect();
+        let batch = sessions
+            .into_iter()
+            .take(remaining.unwrap_or(usize::MAX))
+            .collect();
         let batch_deleted = delete_batch(client, batch).await?;
         total_deleted += batch_deleted;
 
@@ -117,11 +138,17 @@ async fn delete_batch(client: &reqwest::Client, sessions: Vec<Session>) -> Resul
     }
 
     while let Some(task_result) = tasks.join_next().await {
-        task_result.context("delete task panicked")?.context("parallel delete failed")?;
+        task_result
+            .context("delete task panicked")?
+            .context("parallel delete failed")?;
         deleted += 1;
     }
 
-    println!("Deleted listed batch of {} in {:.2?}", batch_size, started_at.elapsed());
+    println!(
+        "Deleted listed batch of {} in {:.2?}",
+        batch_size,
+        started_at.elapsed()
+    );
 
     Ok(deleted)
 }

@@ -2,6 +2,15 @@ name: Run jsw
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to run. Empty downloads the latest published release.
+        required: false
+        type: string
+      delete_limit:
+        description: Non-negative integer. Empty deletes until no sessions remain.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -10,13 +19,20 @@ jobs:
   run:
     runs-on: ubuntu-latest
     env:
+      GH_TOKEN: ${{ github.token }}
       JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      DELETE_LIMIT: ${{ inputs.delete_limit }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Download binary
+        run: |
+          if [ -n "$RELEASE_TAG" ]; then
+            gh release download "$RELEASE_TAG" --pattern jsw-linux-x86_64 --clobber
+          else
+            gh release download --pattern jsw-linux-x86_64 --clobber
+          fi
 
       - name: Run jsw
-        run: cargo run --locked
+        run: |
+          chmod +x ./jsw-linux-x86_64
+          ./jsw-linux-x86_64
