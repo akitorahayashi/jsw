@@ -14,7 +14,7 @@ jobs:
       JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
     steps:
       - name: Download binary
-        run: gh release download --pattern jsw-linux-x86_64 --clobber
+        run: gh release download --repo "$GITHUB_REPOSITORY" --pattern jsw-linux-x86_64 --clobber
 
       - name: Run jsw
         run: |
