@@ -7,8 +7,6 @@ use serde::Deserialize;
 use tokio::task::JoinSet;
 
 const API_BASE_URL: &str = "https://jules.googleapis.com/v1alpha";
-// `Some(n)` deletes only `n` sessions for a dry run. `None` keeps deleting until no sessions remain.
-const DELETE_LIMIT: Option<usize> = None;
 const MAX_PAGE_SIZE: usize = 100;
 
 #[derive(Debug, Deserialize)]
@@ -34,30 +32,12 @@ async fn main() -> Result<()> {
 
     let client = build_client(&api_key)?;
     let started_at = Instant::now();
-    let delete_limit = read_delete_limit()?;
-    let deleted = delete_sessions(&client, delete_limit).await?;
+    let deleted = delete_sessions(&client).await?;
 
     println!("Deleted sessions: {}", deleted);
     println!("Elapsed: {:.2?}", started_at.elapsed());
 
     Ok(())
-}
-
-fn read_delete_limit() -> Result<Option<usize>> {
-    match env::var("DELETE_LIMIT") {
-        Ok(value) => {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                Ok(None)
-            } else {
-                trimmed.parse::<usize>().map(Some).with_context(|| {
-                    format!("DELETE_LIMIT must be a non-negative integer, got {trimmed:?}")
-                })
-            }
-        }
-        Err(env::VarError::NotPresent) => Ok(DELETE_LIMIT),
-        Err(env::VarError::NotUnicode(_)) => bail!("DELETE_LIMIT is not valid Unicode."),
-    }
 }
 
 fn build_client(api_key: &str) -> Result<reqwest::Client> {
@@ -75,27 +55,17 @@ fn build_client(api_key: &str) -> Result<reqwest::Client> {
         .context("failed to build HTTP client")
 }
 
-async fn delete_sessions(client: &reqwest::Client, limit: Option<usize>) -> Result<usize> {
+async fn delete_sessions(client: &reqwest::Client) -> Result<usize> {
     let mut total_deleted = 0usize;
 
     loop {
-        let remaining = limit.map(|limit| limit.saturating_sub(total_deleted));
-        if matches!(remaining, Some(0)) {
-            break;
-        }
-
         // Re-list from the first page after each batch so shrinking results do not leave gaps.
-        let page_size = remaining.unwrap_or(MAX_PAGE_SIZE).min(MAX_PAGE_SIZE);
-        let sessions = list_sessions(client, page_size).await?;
+        let sessions = list_sessions(client, MAX_PAGE_SIZE).await?;
         if sessions.is_empty() {
             break;
         }
 
-        let batch = sessions
-            .into_iter()
-            .take(remaining.unwrap_or(usize::MAX))
-            .collect();
-        let batch_deleted = delete_batch(client, batch).await?;
+        let batch_deleted = delete_batch(client, sessions).await?;
         total_deleted += batch_deleted;
 
         println!("Deleted so far: {}", total_deleted);
